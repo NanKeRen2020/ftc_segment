@@ -16,7 +16,7 @@ contrario approach to segment the 1D histogram into its meaningful modes. Beside
 
 adopt a new tirck which is called local integral to refine to find the minimums of 1D histogram
 
-from image project.
+of canny edge image project.
 
 
 Environments
