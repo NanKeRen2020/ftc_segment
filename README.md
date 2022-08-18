@@ -53,7 +53,7 @@ segment text second row chars image
 
 segment text third row chars image
 
-![image](https://github.com/NanKeRen2020/ftc_segment/blob/main/segment_row_chars2.png)
+![image](https://github.com/NanKeRen2020/ftc_segment/blob/main/segment_row_chars3.png)
 
 
 
