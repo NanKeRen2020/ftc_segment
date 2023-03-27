@@ -9,20 +9,6 @@
 #include "libftc.h"
 
 
-inline void sort_contours_coordinate(std::vector<std::vector<cv::Point>>& contours)
-{
-    std::sort(contours.begin(), contours.end(), 
-              [](const std::vector<cv::Point> con1, const std::vector<cv::Point> con2)
-                { return cv::boundingRect(con1).x < cv::boundingRect(con2).x;});   
-}
-
-inline void sort_contours_area(std::vector<std::vector<cv::Point>>& contours)
-{
-    std::sort(contours.begin(), contours.end(), 
-              [](const std::vector<cv::Point> con1, const std::vector<cv::Point> con2)
-                { return cv::contourArea(con1) > cv::contourArea(con2);});   
-}
-
 cv::Mat denoise(const cv::Mat& gray, const DENOISE_METHOD d_method, int size)
 {
     auto start = std::chrono::high_resolution_clock::now();
@@ -78,73 +64,6 @@ cv::Mat adjust_contrast(const cv::Mat& gray, float gamma)
 }
 
 
-cv::Mat weakAreaCheck(const cv::Mat& testImg, int blur_size, double sigma) 
-{
-
-	cv::Mat result = cv::Mat::zeros(testImg.rows, testImg.cols, CV_8UC1);
-	cv::Mat grayscale = testImg.clone();
-    cv::GaussianBlur(grayscale, grayscale, cv::Size(blur_size, blur_size), sigma); 
-	cv::Mat gradintegral = cv::Mat::zeros(grayscale.rows, grayscale.cols, CV_32F);
-	cv::Mat gradintegral2 = cv::Mat::zeros(grayscale.rows, grayscale.cols, CV_32F);
-	cv::integral(grayscale, gradintegral, CV_32F); 
-	float graymean = 0;
-	int length = 4;
-	int value = 1;
-	float rate = 1.250;
-	for (int i = length; i < grayscale.rows - length; i++) {
-		for (int j = length; j < grayscale.cols - length; j++) {
-			
-				graymean = gradintegral.at<float>(i + length, j + length) + 
-                gradintegral.at<float>(i - length, j - length) - gradintegral.at<float>(i - length, j + length) - 
-                gradintegral.at<float>(i + length, j - length);
-				graymean = graymean / ((length *2 + 1)*(length*2 + 1));
-				if (grayscale.at<uchar>(i, j) < rate*graymean) {
-					value = rate*graymean - grayscale.at<uchar>(i, j);
-					value = value * 60;
-					if (value > 255) {
-						value = 254;
-					}
-					result.at<uchar>(i, j) = value;
-				}
-			
-		}
-	}
-    return result;
-}
-
-
-void unevenLightCompensate(cv::Mat &image, int blockSize)
-{
-	if (image.channels() == 3) cv::cvtColor(image, image, 7);
-	double average = mean(image)[0];
-	int rows_new = ceil(double(image.rows) / double(blockSize));
-	int cols_new = ceil(double(image.cols) / double(blockSize));
-	cv::Mat blockImage;
-	blockImage = cv::Mat::zeros(rows_new, cols_new, CV_32FC1);
-	for (int i = 0; i < rows_new; i++)
-	{
-		for (int j = 0; j < cols_new; j++)
-		{
-			int rowmin = i*blockSize;
-			int rowmax = (i + 1)*blockSize;
-			if (rowmax > image.rows) rowmax = image.rows;
-			int colmin = j*blockSize;
-			int colmax = (j + 1)*blockSize;
-			if (colmax > image.cols) colmax = image.cols;
-			cv::Mat imageROI = image(cv::Range(rowmin, rowmax), cv::Range(colmin, colmax));
-			double temaver = cv::mean(imageROI)[0];
-			blockImage.at<float>(i, j) = temaver;
-		}
-	}
-	blockImage = blockImage - average;
-	cv::Mat blockImage2;
-	cv::resize(blockImage, blockImage2, image.size(), (0, 0), (0, 0), cv::INTER_CUBIC);
-	cv::Mat image2;
-	image.convertTo(image2, CV_32FC1);
-	cv::Mat dst = image2 - blockImage2;
-	dst.convertTo(image, CV_8UC1);
-}
-
 // 对灰度图像进行光照均匀化
 void compensate_uneven_light(cv::Mat &gray_img, int blockSize)
 {
@@ -180,12 +99,9 @@ void compensate_uneven_light(cv::Mat &gray_img, int blockSize)
 	dst.convertTo(gray_img, CV_8UC1);
 }
 
-void check_roi_valid(cv::Rect& roi, int width, int height)
+bool check_roi_valid(cv::Rect& roi, int width, int height)
 {
-    /*
-    roi.x = (roi.x < 0) ? 0 : roi.x;
-    roi.y = (roi.y < 0) ? 0 : roi.y;
-    */
+
     if (roi.x < 0)
     {
         roi.width += roi.x;
@@ -198,15 +114,14 @@ void check_roi_valid(cv::Rect& roi, int width, int height)
     }
     if (roi.x + roi.width > width)
     {
-        std::cout << roi.x << ", " << roi.width << ", " << width << ", ";
         roi.width = width - roi.x - 1;
     }
     if (roi.y + roi.height > height)
     {
-        std::cout << roi.y << ", " << roi.height << ", " << height;
         roi.height = height - roi.y - 1;
     }
-    std::cout << std::endl;
+    
+    return (roi.width > 0) && (roi.height > 0);
 }
 
 void change_bg_black(cv::Mat& binary_img, const cv::Rect roi)
@@ -215,14 +130,7 @@ void change_bg_black(cv::Mat& binary_img, const cv::Rect roi)
     if (roi.width > 0 && roi.height > 0)  bin_roi = bin_roi(roi);
     cv::Mat zero_mask = cv::Mat::zeros(3*bin_roi.rows/4, 3*bin_roi.cols/4, CV_8UC1);
     cv::Mat substract = bin_roi.clone();
-    zero_mask.copyTo(substract(cv::Rect(bin_roi.cols/8, bin_roi.rows/8, 3*bin_roi.cols/4, 3*bin_roi.rows/4)));
-    /*
-    if (show_image)
-    {
-        show_mat = substract;
-        show_img("substract", show_mat);
-    } 
-    */   
+    zero_mask.copyTo(substract(cv::Rect(bin_roi.cols/8, bin_roi.rows/8, 3*bin_roi.cols/4, 3*bin_roi.rows/4)));  
     if (cv::sum(substract)[0] > 255*bin_roi.rows*bin_roi.cols/4)
     { 
         std::cout << "substract sum: " << cv::sum(substract)[0] << std::endl;
@@ -230,47 +138,6 @@ void change_bg_black(cv::Mat& binary_img, const cv::Rect roi)
     }
 }
 
-
-// 统计二值图像像素值 将图像改为黑色背景白色前景图像
-void change_bg_black(cv::Mat& binary_img, float low_thr_ratio, float high_thr_ratio)
-{
-    cv::Mat project;
-   
-    // 沿短边投影
-    int width, height;
-    if (binary_img.cols >= binary_img.rows)
-    {
-        cv::reduce(binary_img, project, 0, cv::REDUCE_SUM, CV_32S);
-        width = binary_img.cols;
-        height = binary_img.rows;
-    }
-    else
-    {
-        cv::reduce(binary_img, project, 1, cv::REDUCE_SUM, CV_32S);
-        width = binary_img.rows;
-        height = binary_img.cols;
-    }
-
-    int low = 0;
-    //int high = 0;
-    int low_thr = low_thr_ratio * height;
-    //int high_thr = high_thr_ratio * height;
-    for (auto it = project.begin<int>(); it != project.end<int>(); ++it)
-    {
-        /*
-        if (*it > high_thr)
-           ++high;
-        */
-        if (*it < low_thr)
-           ++low;
-    }
-
-    if ((width - low) > low)
-    {
-        binary_img = ~binary_img;
-    }
-    
-}
 
 // 计算mat数组的局部积分
 std::vector<unsigned int> get_local_integral(const cv::Mat& project, int integral_width)
@@ -413,69 +280,6 @@ void canny_free( const cv::Mat &image, cv::Mat &edgeMap, std::pair<float, float>
 }
 
 
-std::vector<cv::Rect> detect_text_rois(cv::Mat edge_img, const cv::Size& close_size, const cv::Size& open_size, int text_rois_size)
-{
-    
-    cv::Mat text_close, text_open;
-    cv::Mat element = cv::getStructuringElement( 0, close_size);
-    cv::morphologyEx(edge_img, text_close, CV_MOP_CLOSE, element);
-    element = cv::getStructuringElement( 0, open_size);
-    cv::morphologyEx(text_close, text_open, CV_MOP_OPEN, element); 
-    //cv::imwrite("/opt/history/temp_images/text_open.png", text_open);  
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(text_open, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE); 
-    std::sort(contours.begin(), contours.end(), [](const std::vector<cv::Point> con1, const std::vector<cv::Point> con2)
-                    { return cv::contourArea(con1) > cv::contourArea(con2); });  
-    if (contours.size() > text_rois_size)  contours.erase(contours.begin() + text_rois_size - 1, contours.end());
-    std::vector<cv::Rect> text_rois;
-    for (auto con: contours)
-    {
-        text_rois.push_back(cv::boundingRect(con));
-    }
-    std::sort(text_rois.begin(), text_rois.end(), [](const cv::Rect& roi1, const cv::Rect& roi2)
-                    { return roi1.x < roi2.x; }); 
-    return text_rois;
-}
-
-
-void adjust_angle(const cv::Mat& img, float angle, cv::Mat& affine_img)
-{
-    cv::Mat warp_mat = getRotationMatrix2D(cv::Point(img.cols/2, img.rows/2), angle, 1.0);
-    cv::warpAffine(img, affine_img, warp_mat, img.size());
-}
-
-
-std::pair<unsigned int, unsigned int> find_boundary(const std::vector<unsigned int>& project_vector, unsigned int boundary_thr1, unsigned int boundary_thr2, 
-                                                    const std::vector<unsigned int>::iterator start)
-{
-    unsigned int boundary1 = 0;
-    unsigned int boundary2 = 0;
-
-    for (std::vector<unsigned int>::iterator it = start; it != project_vector.cend(); ++it)
-    {
-        if (boundary1 == 0 && (*it > boundary_thr1))
-        {
-            boundary1 = it - start;
-        }
-
-        if ((boundary2 == 0) && ( *( project_vector.cend() - (it -  start) - 1 ) > boundary_thr2) )
-        {
-            boundary2 = it - start;
-
-        }
-        
-        if ((boundary1 != 0) && (boundary2 != 0))
-        {
-            break;
-        }
-       
-        
-    }
-
-    return std::pair<int, int>(boundary1, boundary2);
-}
-
-
 cv::Mat preprocess_text_area(const cv::Mat& text_area, uchar text_denoise, uchar text_denoise_size, uchar text_smooth, uchar text_smooth_size,
                              float text_smooth_sigma, uchar compensate_size, float text_alpha)
 {
@@ -501,45 +305,6 @@ cv::Mat preprocess_text_area(const cv::Mat& text_area, uchar text_denoise, uchar
 
     return text_filtered;
     
-}
-
-
-void find_minimums(const std::vector<unsigned int>::iterator start, const std::vector<unsigned>::iterator begin, 
-                   const std::vector<unsigned>::iterator end, std::vector<int>& minimums, int stop_width, 
-                   bool stop_width_halve, int gap_max_value)
-{
-    auto it = std::min_element(begin, end);
-    int loc = static_cast<int>(it - start);
-    if (gap_max_value && *it < gap_max_value)
-    {
-        minimums.push_back(loc);
-    }
-    else if (!gap_max_value)
-    {
-        minimums.push_back(loc);
-    }
-    else
-    {
-        /* code */
-    }
-    
-
-    int diff = stop_width;
-    // 停止宽度减半
-    if (stop_width_halve)
-    {
-        diff = stop_width/2;
-    }
-    auto diff_begin = it  - begin;
-    auto diff_end = end - it;
-    if ( diff_begin > diff )
-    {
-        find_minimums(start, begin, it - 3, minimums, stop_width, stop_width_halve, gap_max_value);
-    }
-    if ( diff_end > diff )
-    {
-        find_minimums(start, it + 3, end, minimums, stop_width, stop_width_halve, gap_max_value);
-    }
 }
 
 
@@ -583,27 +348,6 @@ std::vector<cv::Rect> segment_ftc(const cv::Mat& edge_to_project, int integral_l
     
 }
 
-
-
-std::string filter_string(const std::string filter_string, const std::string ignore_string)
-{
-    std::string filtered_string = filter_string;
-    for (auto c: ignore_string)
-    {
-        for (auto it = filtered_string.begin(); it != filtered_string.end();)
-        {
-            if (*it == c)
-            filtered_string.erase(it);
-            else
-            {
-                ++it;
-            }
-            
-        }
-        
-    }
-    return filtered_string;
-}
 
 
 //求区域内均值 integral即为积分图
